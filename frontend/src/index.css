@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background-color: #000000;
+  color: #ffffff;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* Dark Leaflet */
+.leaflet-container {
+  background: #0f0f0f;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Tooltip */
+.leaflet-tooltip {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  color: #ffffff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  border-radius: 3px;
+}
+.leaflet-tooltip-top::before { border-top-color: #333; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0f0f0f; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+
+input[type="range"] { accent-color: #ffffff; }
+
+/* Leaflet control buttons */
+.leaflet-control-zoom a {
+  background: #1a1a1a !important;
+  color: #fff !important;
+  border-color: #333 !important;
+}
+.leaflet-control-zoom a:hover {
+  background: #333 !important;
+}

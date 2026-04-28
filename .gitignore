@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Database — upload separately, don't commit
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+
+# Secrets
+backend/.env
+
+# Node
+node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db

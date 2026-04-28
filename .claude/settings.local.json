@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(python -m pip install -r requirements.txt)",
+      "Bash(where python3 *)",
+      "Bash(where py *)",
+      "Read(//c/Users/BenCa/AppData/Local/Programs/**)",
+      "Bash(ls \"/c/Python3\"*)",
+      "Bash(py --version)",
+      "Bash(conda --version)",
+      "Bash(pipx --version)",
+      "Read(//c/Users/BenCa/anaconda3/**)",
+      "Read(//c/Users/BenCa/miniconda3/**)",
+      "Bash(npm run *)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(pip install *)",
+      "Bash(python -m pip install \"pydantic\" --pre)",
+      "Bash(python -m pip install \"pydantic-settings\" --pre)",
+      "Bash(python -m pip install fastapi \"uvicorn[standard]\" httpx sqlalchemy aiosqlite python-dotenv tenacity)",
+      "Bash(python -m uvicorn main:app --reload --port 8000)",
+      "Bash(curl -s http://localhost:8000/api/stats)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 66148 /F)",
+      "Bash(taskkill /PID 59356 /F)",
+      "Bash(python -c \"from database import settings; print\\('key:', repr\\(settings.google_places_api_key[:10]\\) if settings.google_places_api_key else 'EMPTY'\\)\")",
+      "PowerShell(Stop-Process -Force)",
+      "Bash(curl -sv http://localhost:8000/api/stats)",
+      "Bash(curl -s http://localhost:8000/api/scan/bc0b5c54-67ca-455b-ab68-3b28c9129bd4)",
+      "Bash(curl -s -X POST http://localhost:8000/api/import/WY -H \"Content-Type: application/json\" -d '{\"facility_types\":[\"self_storage\",\"mobile_home_park\"]}')",
+      "Bash(curl -s http://localhost:8000/api/scan/9278d429-f0c9-44a5-99ef-cda39e2eb363)",
+      "Bash(curl -sv -X POST https://overpass-api.de/api/interpreter -H 'User-Agent: StorageScout/1.0' -H 'Accept: application/json' --data-urlencode 'data=[out:json][timeout:10];node[\"amenity\"=\"self_storage\"][\"ISO3166-1\"=\"US\"];out 1;')",
+      "Bash(python -c ' *)",
+      "Bash(curl -s http://localhost:8000/api/scan/7046166e-e464-4c2f-b8c2-fb9fb48411ed)",
+      "Bash(curl -s http://localhost:8000/api/scan/4cff8f15-d14c-4929-b1cd-af96420b33b0)",
+      "Bash(curl -s http://localhost:8000/api/scan/5853e58a-e8b0-46b2-b717-d6d54b4073d1)"
+    ]
+  }
+}

@@ -1,0 +1,280 @@
+import asyncio
+import json
+import logging
+import uuid
+from datetime import datetime
+from typing import Any, Optional
+
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy import func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from database import AsyncSessionLocal, get_db, init_db, settings
+from models import Facility
+from places_fetcher import US_STATES, fetch_facilities_for_state
+from scorer import score_facility
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Storage Scout API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# In-memory scan state (resets on server restart, which is fine for a tool)
+active_scans: dict[str, dict] = {}
+
+
+@app.on_event("startup")
+async def startup():
+    await init_db()
+
+
+# ---------------------------------------------------------------------------
+# Facilities
+# ---------------------------------------------------------------------------
+
+@app.get("/api/facilities")
+async def get_facilities(
+    state: Optional[str] = None,
+    facility_type: Optional[str] = None,
+    min_score: Optional[int] = None,
+    max_score: Optional[int] = None,
+    scan_status: Optional[str] = None,
+    deal_stage: Optional[str] = None,
+    limit: int = 1000,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(Facility)
+    if state:
+        q = q.where(Facility.state == state)
+    if facility_type:
+        q = q.where(Facility.facility_type == facility_type)
+    if min_score is not None:
+        q = q.where(Facility.opportunity_score >= min_score)
+    if max_score is not None:
+        q = q.where(Facility.opportunity_score <= max_score)
+    if scan_status:
+        q = q.where(Facility.scan_status == scan_status)
+    if deal_stage:
+        q = q.where(Facility.deal_stage == deal_stage)
+    q = (
+        q.order_by(Facility.opportunity_score.desc().nullslast())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = (await db.execute(q)).scalars().all()
+    return [_to_dict(f) for f in rows]
+
+
+@app.get("/api/stats")
+async def get_stats(db: AsyncSession = Depends(get_db)):
+    total = await db.scalar(select(func.count(Facility.id)))
+    scanned = await db.scalar(
+        select(func.count(Facility.id)).where(Facility.scan_status == "complete")
+    )
+    high_opp = await db.scalar(
+        select(func.count(Facility.id)).where(Facility.opportunity_score >= 70)
+    )
+    return {
+        "total_facilities": total or 0,
+        "scanned": scanned or 0,
+        "high_opportunity": high_opp or 0,
+        "pending": (total or 0) - (scanned or 0),
+        "has_api_key": bool(settings.google_places_api_key),
+        "active_scans": list(active_scans.values()),
+    }
+
+
+VALID_STAGES = {"new", "contacted", "interested", "under_loi", "closed", "dead"}
+
+
+@app.patch("/api/facilities/{facility_id}")
+async def update_facility(
+    facility_id: str,
+    body: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+):
+    allowed = {"deal_stage", "notes"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if "deal_stage" in updates and updates["deal_stage"] not in VALID_STAGES:
+        raise HTTPException(400, "Invalid deal stage")
+    if not updates:
+        raise HTTPException(400, "Nothing to update")
+    await db.execute(
+        update(Facility).where(Facility.id == facility_id).values(**updates)
+    )
+    await db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Import / scan
+# ---------------------------------------------------------------------------
+
+class ImportRequest(BaseModel):
+    facility_types: list[str] = ["self_storage", "mobile_home_park"]
+
+
+@app.post("/api/import/{state_code}")
+async def import_state(
+    state_code: str,
+    body: ImportRequest,
+    background_tasks: BackgroundTasks,
+):
+    state_code = state_code.upper()
+    if state_code not in US_STATES:
+        raise HTTPException(400, f"Unknown state code: {state_code}")
+
+    scan_id = str(uuid.uuid4())
+    active_scans[scan_id] = {
+        "id": scan_id,
+        "status": "starting",
+        "state": state_code,
+        "progress": 0,
+        "total": 0,
+        "fetched": 0,
+        "new_count": 0,
+    }
+    background_tasks.add_task(_run_import, scan_id, state_code, body.facility_types)
+    return {"scan_id": scan_id}
+
+
+@app.get("/api/scan/{scan_id}")
+async def get_scan(scan_id: str):
+    if scan_id not in active_scans:
+        raise HTTPException(404, "Scan not found")
+    return active_scans[scan_id]
+
+
+# ---------------------------------------------------------------------------
+# Background worker
+# ---------------------------------------------------------------------------
+
+async def _run_import(scan_id: str, state_code: str, facility_types: list[str]):
+    try:
+        active_scans[scan_id]["status"] = "fetching"
+        facilities_data = await fetch_facilities_for_state(state_code, facility_types)
+        active_scans[scan_id]["fetched"] = len(facilities_data)
+
+        # Persist new facilities — deduplicate by google_place_id
+        async with AsyncSessionLocal() as db:
+            new_count = 0
+            for fdata in facilities_data:
+                place_id = fdata.get("google_place_id")
+                if place_id:
+                    exists = await db.scalar(
+                        select(Facility.id).where(Facility.google_place_id == place_id)
+                    )
+                else:
+                    exists = None
+                if not exists:
+                    db.add(Facility(id=str(uuid.uuid4()), **fdata))
+                    new_count += 1
+            await db.commit()
+
+        active_scans[scan_id]["new_count"] = new_count
+
+        if not settings.google_places_api_key:
+            active_scans[scan_id]["status"] = "complete_no_key"
+            active_scans[scan_id]["message"] = (
+                "Imported without scoring — paste your Google Places API key into backend/.env and restart"
+            )
+            return
+
+        # Score all pending facilities for this state
+        active_scans[scan_id]["status"] = "scoring"
+        async with AsyncSessionLocal() as db:
+            pending = (
+                await db.execute(
+                    select(Facility)
+                    .where(Facility.state == state_code)
+                    .where(Facility.scan_status == "pending")
+                )
+            ).scalars().all()
+
+        active_scans[scan_id]["total"] = len(pending)
+        sem = asyncio.Semaphore(5)
+
+        async def _score_one(f: Facility):
+            async with sem:
+                try:
+                    result = await score_facility({
+                        "name": f.name,
+                        "address": f.address,
+                        "city": f.city,
+                        "state": f.state,
+                        "lat": f.lat,
+                        "lng": f.lng,
+                        "facility_type": f.facility_type,
+                        "google_place_id": f.google_place_id,
+                        "google_name": f.google_name,
+                        "google_rating": f.google_rating,
+                        "google_review_count": f.google_review_count,
+                        "google_business_status": f.google_business_status,
+                    })
+                    async with AsyncSessionLocal() as db2:
+                        await db2.execute(
+                            update(Facility)
+                            .where(Facility.id == f.id)
+                            .values(
+                                **result,
+                                scan_status="complete",
+                                scanned_at=datetime.utcnow(),
+                            )
+                        )
+                        await db2.commit()
+                except Exception as e:
+                    logger.error("Score failed for %s: %s", f.id, e)
+                finally:
+                    active_scans[scan_id]["progress"] += 1
+
+        await asyncio.gather(*[_score_one(f) for f in pending])
+        active_scans[scan_id]["status"] = "complete"
+
+    except Exception as e:
+        logger.error("Import %s failed: %s", scan_id, e)
+        active_scans[scan_id]["status"] = "error"
+        active_scans[scan_id]["error"] = str(e)
+
+
+# ---------------------------------------------------------------------------
+# Serializer
+# ---------------------------------------------------------------------------
+
+def _to_dict(f: Facility) -> dict:
+    return {
+        "id": f.id,
+        "osm_id": f.osm_id,
+        "name": f.name,
+        "facility_type": f.facility_type,
+        "lat": f.lat,
+        "lng": f.lng,
+        "address": f.address,
+        "city": f.city,
+        "state": f.state,
+        "zip_code": f.zip_code,
+        "google_place_id": f.google_place_id,
+        "google_name": f.google_name,
+        "google_website": f.google_website,
+        "google_phone": f.google_phone,
+        "google_rating": f.google_rating,
+        "google_review_count": f.google_review_count,
+        "google_business_status": f.google_business_status,
+        "opportunity_score": f.opportunity_score,
+        "score_breakdown": json.loads(f.score_breakdown) if f.score_breakdown else None,
+        "website_alive": f.website_alive,
+        "scan_status": f.scan_status,
+        "scanned_at": f.scanned_at.isoformat() if f.scanned_at else None,
+        "deal_stage": f.deal_stage,
+        "notes": f.notes,
+    }
