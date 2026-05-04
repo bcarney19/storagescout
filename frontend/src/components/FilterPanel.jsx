@@ -22,7 +22,7 @@ const DEAL_STAGES = [
   { value: 'dead', label: 'Dead' },
 ]
 
-export default function FilterPanel({ filters, onChange }) {
+export default function FilterPanel({ filters, onChange, onToggleIndependentScope }) {
   const set = (key, val) => onChange((prev) => ({ ...prev, [key]: val }))
 
   return (
@@ -81,8 +81,8 @@ export default function FilterPanel({ filters, onChange }) {
           </div>
           <input type="range" min={0} max={100} value={filters.min_target_score}
             onChange={(e) => set('min_target_score', Number(e.target.value))} className="w-full" />
-          <ToggleBtn active={filters.independent_only} onClick={() => set('independent_only', !filters.independent_only)}>
-            Suppress Chains
+          <ToggleBtn active={filters.independent_only} onClick={onToggleIndependentScope}>
+            {filters.independent_only ? 'Independents Only' : 'All Operators'}
           </ToggleBtn>
         </div>
       </Section>

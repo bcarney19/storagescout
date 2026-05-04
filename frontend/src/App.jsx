@@ -160,6 +160,17 @@ export default function App() {
     setSelected(null)
   }
 
+  const toggleIndependentScope = () => {
+    setFilters((prev) => {
+      const nextIndependent = !prev.independent_only
+      return {
+        ...prev,
+        independent_only: nextIndependent,
+        min_target_score: nextIndependent ? Math.max(prev.min_target_score, 65) : 0,
+      }
+    })
+  }
+
   return (
     <div className="flex flex-col h-full bg-black text-white font-mono overflow-hidden">
       {/* Top bar */}
@@ -207,7 +218,11 @@ export default function App() {
       </div>
 
       <div className="flex flex-1 min-h-0">
-        <FilterPanel filters={filters} onChange={setFilters} />
+        <FilterPanel
+          filters={filters}
+          onChange={setFilters}
+          onToggleIndependentScope={toggleIndependentScope}
+        />
 
         <div className="flex flex-col flex-1 min-w-0">
           {/* View toggle */}
@@ -218,12 +233,12 @@ export default function App() {
             {view !== 'entities' && (
               <>
                 <button
-                  onClick={() => setFilters((p) => ({ ...p, independent_only: !p.independent_only }))}
+                  onClick={toggleIndependentScope}
                   className={`px-2 py-1 text-xs rounded transition-colors ${
                     filters.independent_only ? 'bg-white text-black font-bold' : 'text-gray-500 hover:text-white'
                   }`}
                 >
-                  INDEPENDENT
+                  {filters.independent_only ? 'INDEPENDENTS' : 'ALL OPS'}
                 </button>
                 <div className="flex items-center gap-2 bg-surface-800 border border-surface-600 rounded px-2 py-1 ml-2 w-72">
                   <Search size={11} className="text-gray-600 shrink-0" />
@@ -248,7 +263,7 @@ export default function App() {
             </span>
             {view !== 'entities' && (
               <span className="text-xs text-gray-600 tabular-nums">
-                MHP {typeCounts.mobile.toLocaleString()} / SS {typeCounts.storage.toLocaleString()} / target {filters.min_target_score}+
+                MHP {typeCounts.mobile.toLocaleString()} / SS {typeCounts.storage.toLocaleString()} / target {filters.min_target_score}+ / {filters.independent_only ? 'independent' : 'all ops'}
               </span>
             )}
           </div>
