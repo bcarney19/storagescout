@@ -53,20 +53,23 @@ NON_TARGET_PATTERNS = (
     "inn",
     "lodge",
     "motel",
+    "retreat",
     "rv park",
     "rv resort",
+    "secluded",
     "short term rental",
+    "sleeps ",
     "tiny home",
     "trailer parking",
     "vacation rental",
 )
 
-REAL_MHP_PATTERNS = (
-    "manufactured home",
-    "mobile home",
-    "mhp",
-    "trailer court",
-    "trailer park",
+REAL_MHP_REGEXES = (
+    r"\bmanufactured homes?\b",
+    r"\bmobile homes?\b",
+    r"\bmhp\b",
+    r"\btrailer court\b",
+    r"\btrailer park\b(?!ing)",
 )
 
 
@@ -95,7 +98,10 @@ def is_non_target(facility: Facility) -> bool:
         str(part or "").lower()
         for part in (facility.name, facility.google_name, facility.address)
     )
-    if any(pattern in name for pattern in REAL_MHP_PATTERNS):
+    compact_name = re.sub(r"[^a-z0-9]", "", name)
+    if len(compact_name) <= 2:
+        return True
+    if any(re.search(pattern, name) for pattern in REAL_MHP_REGEXES):
         return False
     return any(pattern in name for pattern in NON_TARGET_PATTERNS)
 
