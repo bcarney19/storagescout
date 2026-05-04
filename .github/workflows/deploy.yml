@@ -16,4 +16,5 @@ jobs:
           script_stop: true
           script: |
             cd /var/www/storagescout
+            sudo git pull --ff-only origin main
             sudo bash deploy/update.sh
