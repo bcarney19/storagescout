@@ -108,9 +108,11 @@ async def get_facilities(
         q = q.where(Facility.google_review_count == 0)
     if dead_website:
         q = q.where(Facility.website_alive.is_(False))
+    post_filters = independent_only or exclude_non_targets or min_target_score is not None
+    query_limit = min(10000, max(limit, limit * 5 if post_filters else limit))
     q = (
         q.order_by(Facility.opportunity_score.desc().nullslast())
-        .limit(limit)
+        .limit(query_limit)
         .offset(offset)
     )
     rows = (await db.execute(q)).scalars().all()

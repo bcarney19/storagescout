@@ -94,11 +94,15 @@ def is_probably_independent(facility: Facility) -> bool:
 
 
 def is_non_target(facility: Facility) -> bool:
+    name_only = " ".join(
+        str(part or "").lower()
+        for part in (facility.name, facility.google_name)
+    )
     name = " ".join(
         str(part or "").lower()
         for part in (facility.name, facility.google_name, facility.address)
     )
-    compact_name = re.sub(r"[^a-z0-9]", "", name)
+    compact_name = re.sub(r"[^a-z0-9]", "", name_only)
     if len(compact_name) <= 2:
         return True
     if any(re.search(pattern, name) for pattern in REAL_MHP_REGEXES):
