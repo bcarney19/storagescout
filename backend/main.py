@@ -14,7 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import AsyncSessionLocal, get_db, init_db, settings
 from entity_linker import rebuild_entities
 from models import Entity, Facility, FacilityEntityLink
-from places_fetcher import US_STATES, fetch_facilities_for_state
+from places_fetcher import (
+    US_STATES,
+    _component,
+    _get_import_details,
+    _state_from_components,
+    _street_address,
+    fetch_facilities_for_state,
+)
 from scorer import score_facility
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -192,6 +199,68 @@ async def rebuild_entity_links(
     db: AsyncSession = Depends(get_db),
 ):
     return await rebuild_entities(db)
+
+
+@app.post("/api/facilities/revalidate-states")
+async def revalidate_facility_states(
+    _: None = Depends(require_import_token),
+    db: AsyncSession = Depends(get_db),
+):
+    facilities = (
+        await db.execute(
+            select(Facility).where(Facility.google_place_id.is_not(None))
+        )
+    ).scalars().all()
+
+    checked = 0
+    updated = 0
+    deleted = 0
+    skipped = 0
+    for facility in facilities:
+        details = await _get_import_details(facility.google_place_id)
+        checked += 1
+        if not details:
+            skipped += 1
+            continue
+
+        components = details.get("address_components", [])
+        actual_state = _state_from_components(components)
+        if actual_state not in US_STATES:
+            await db.delete(facility)
+            deleted += 1
+            continue
+
+        values = {
+            "state": actual_state,
+            "address": _street_address(components) or details.get("formatted_address"),
+            "city": (
+                _component(components, "locality")
+                or _component(components, "postal_town")
+                or _component(components, "administrative_area_level_2")
+            ),
+            "zip_code": _component(components, "postal_code"),
+            "google_name": details.get("name") or facility.google_name,
+            "google_rating": details.get("rating"),
+            "google_review_count": details.get("user_ratings_total"),
+            "google_business_status": details.get("business_status", facility.google_business_status),
+        }
+        changed = any(getattr(facility, key) != value for key, value in values.items())
+        if changed:
+            await db.execute(
+                update(Facility)
+                .where(Facility.id == facility.id)
+                .values(**values)
+            )
+            updated += 1
+
+    await db.commit()
+    await rebuild_entities(db)
+    return {
+        "checked": checked,
+        "updated": updated,
+        "deleted_non_us": deleted,
+        "skipped": skipped,
+    }
 
 
 # ---------------------------------------------------------------------------
