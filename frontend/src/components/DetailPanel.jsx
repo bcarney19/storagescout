@@ -1,5 +1,6 @@
-import { Building2, ExternalLink, Globe, Home, MapPin, Phone, Star, X } from 'lucide-react'
-import { useState } from 'react'
+import { Building2, ExternalLink, GitBranch, Globe, Home, MapPin, Phone, Star, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { api } from '../api'
 
 const STAGE_OPTIONS = [
   { value: 'new',        label: 'New',       ring: 'border-gray-600' },
@@ -59,13 +60,26 @@ function BreakdownBar({ label, points, max }) {
   )
 }
 
-export default function DetailPanel({ facility: f, onClose, onUpdate }) {
+export default function DetailPanel({ facility: f, onClose, onUpdate, onSelectFacility }) {
   const [notes, setNotes] = useState(f.notes || '')
   const [saving, setSaving] = useState(false)
+  const [entities, setEntities] = useState([])
+  const [entitiesLoading, setEntitiesLoading] = useState(false)
 
   const bd = f.score_breakdown || {}
   const mapsUrl = `https://www.google.com/maps?q=${f.lat},${f.lng}`
   const label = f.opportunity_score != null ? scoreLabel(f.opportunity_score) : null
+
+  useEffect(() => {
+    setNotes(f.notes || '')
+    let cancelled = false
+    setEntitiesLoading(true)
+    api.getFacilityEntities(f.id)
+      .then((data) => { if (!cancelled) setEntities(data) })
+      .catch(() => { if (!cancelled) setEntities([]) })
+      .finally(() => { if (!cancelled) setEntitiesLoading(false) })
+    return () => { cancelled = true }
+  }, [f.id, f.notes])
 
   const saveNotes = async () => {
     setSaving(true)
@@ -185,6 +199,45 @@ export default function DetailPanel({ facility: f, onClose, onUpdate }) {
         </div>
       </div>
 
+      {/* Entity links */}
+      <div className="p-3 border-b border-surface-600">
+        <div className="text-xs text-gray-600 tracking-widest mb-2">ENTITY LINKS</div>
+        {entitiesLoading ? (
+          <div className="text-xs text-gray-600">Linking...</div>
+        ) : entities.length === 0 ? (
+          <div className="text-xs text-gray-600 leading-relaxed">
+            No inferred operator links yet.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {entities.map((entity) => (
+              <div key={entity.id} className="bg-surface-800 border border-surface-600 rounded p-2">
+                <div className="flex items-center gap-1.5 text-xs text-white font-bold mb-1">
+                  <GitBranch size={10} className="text-gray-500" />
+                  <span className="truncate">{entity.name}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+                  <span>{linkLabel(entity.link?.link_type)}</span>
+                  <span>{Math.round((entity.confidence || 0) * 100)}%</span>
+                </div>
+                <div className="flex flex-col gap-1">
+                  {entity.linked_facilities.slice(0, 4).map((linked) => (
+                    <button
+                      key={linked.id}
+                      onClick={() => onSelectFacility?.(linked)}
+                      className="text-left text-xs text-gray-400 hover:text-white truncate"
+                      title={[linked.name, linked.city, linked.state].filter(Boolean).join(' · ')}
+                    >
+                      {linked.name || 'Unnamed'} <span className="text-gray-600">{linked.city || linked.state}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Notes */}
       <div className="p-3 flex-1 flex flex-col">
         <div className="text-xs text-gray-600 tracking-widest mb-2">NOTES</div>
@@ -209,4 +262,12 @@ function InfoRow({ icon, label, children }) {
       <span className="min-w-0 flex-1">{children}</span>
     </div>
   )
+}
+
+function linkLabel(type) {
+  return {
+    shared_domain: 'shared domain',
+    shared_phone: 'shared phone',
+    same_state_name: 'same name/state',
+  }[type] || 'inferred link'
 }

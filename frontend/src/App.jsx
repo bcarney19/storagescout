@@ -109,7 +109,12 @@ export default function App() {
         </div>
 
         {selected && (
-          <DetailPanel facility={selected} onClose={() => setSelected(null)} onUpdate={handleUpdate} />
+          <DetailPanel
+            facility={selected}
+            onClose={() => setSelected(null)}
+            onUpdate={handleUpdate}
+            onSelectFacility={setSelected}
+          />
         )}
       </div>
 

@@ -12,7 +12,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import AsyncSessionLocal, get_db, init_db, settings
-from models import Facility
+from entity_linker import rebuild_entities
+from models import Entity, Facility, FacilityEntityLink
 from places_fetcher import US_STATES, fetch_facilities_for_state
 from scorer import score_facility
 
@@ -98,6 +99,19 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 VALID_STAGES = {"new", "contacted", "interested", "under_loi", "closed", "dead"}
 
 
+async def require_import_token(
+    authorization: Optional[str] = Header(default=None),
+    x_import_token: Optional[str] = Header(default=None),
+):
+    if not settings.import_api_token:
+        return
+    bearer = None
+    if authorization and authorization.lower().startswith("bearer "):
+        bearer = authorization[7:].strip()
+    if x_import_token != settings.import_api_token and bearer != settings.import_api_token:
+        raise HTTPException(401, "Import token required")
+
+
 @app.patch("/api/facilities/{facility_id}")
 async def update_facility(
     facility_id: str,
@@ -118,24 +132,74 @@ async def update_facility(
 
 
 # ---------------------------------------------------------------------------
+# Entity links
+# ---------------------------------------------------------------------------
+
+@app.get("/api/facilities/{facility_id}/entities")
+async def get_facility_entities(
+    facility_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(
+            select(Entity, FacilityEntityLink)
+            .join(FacilityEntityLink, FacilityEntityLink.entity_id == Entity.id)
+            .where(FacilityEntityLink.facility_id == facility_id)
+            .order_by(FacilityEntityLink.strength.desc())
+        )
+    ).all()
+
+    result = []
+    for entity, link in rows:
+        linked_facilities = (
+            await db.execute(
+                select(Facility)
+                .join(FacilityEntityLink, FacilityEntityLink.facility_id == Facility.id)
+                .where(FacilityEntityLink.entity_id == entity.id)
+                .where(Facility.id != facility_id)
+                .order_by(Facility.opportunity_score.desc().nullslast())
+                .limit(12)
+            )
+        ).scalars().all()
+        result.append({
+            **_entity_to_dict(entity),
+            "link": _link_to_dict(link),
+            "linked_facilities": [_to_dict(f) for f in linked_facilities],
+        })
+    return result
+
+
+@app.get("/api/entities")
+async def get_entities(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(
+            select(Entity)
+            .order_by(Entity.confidence.desc(), Entity.name.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).scalars().all()
+    return [_entity_to_dict(e) for e in rows]
+
+
+@app.post("/api/entities/rebuild")
+async def rebuild_entity_links(
+    _: None = Depends(require_import_token),
+    db: AsyncSession = Depends(get_db),
+):
+    return await rebuild_entities(db)
+
+
+# ---------------------------------------------------------------------------
 # Import / scan
 # ---------------------------------------------------------------------------
 
 class ImportRequest(BaseModel):
     facility_types: list[str] = ["self_storage", "mobile_home_park"]
-
-
-async def require_import_token(
-    authorization: Optional[str] = Header(default=None),
-    x_import_token: Optional[str] = Header(default=None),
-):
-    if not settings.import_api_token:
-        return
-    bearer = None
-    if authorization and authorization.lower().startswith("bearer "):
-        bearer = authorization[7:].strip()
-    if x_import_token != settings.import_api_token and bearer != settings.import_api_token:
-        raise HTTPException(401, "Import token required")
 
 
 @app.post("/api/import/{state_code}")
@@ -199,6 +263,8 @@ async def _run_import(scan_id: str, state_code: str, facility_types: list[str]):
         active_scans[scan_id]["new_count"] = new_count
 
         if not settings.google_places_api_key:
+            async with AsyncSessionLocal() as db:
+                await rebuild_entities(db)
             active_scans[scan_id]["status"] = "complete_no_key"
             active_scans[scan_id]["message"] = (
                 "Imported without scoring — paste your Google Places API key into backend/.env and restart"
@@ -253,6 +319,8 @@ async def _run_import(scan_id: str, state_code: str, facility_types: list[str]):
                     active_scans[scan_id]["progress"] += 1
 
         await asyncio.gather(*[_score_one(f) for f in pending])
+        async with AsyncSessionLocal() as db:
+            await rebuild_entities(db)
         active_scans[scan_id]["status"] = "complete"
 
     except Exception as e:
@@ -291,4 +359,26 @@ def _to_dict(f: Facility) -> dict:
         "scanned_at": f.scanned_at.isoformat() if f.scanned_at else None,
         "deal_stage": f.deal_stage,
         "notes": f.notes,
+    }
+
+
+def _entity_to_dict(e: Entity) -> dict:
+    return {
+        "id": e.id,
+        "entity_type": e.entity_type,
+        "name": e.name,
+        "normalized_key": e.normalized_key,
+        "confidence": e.confidence,
+        "signals": json.loads(e.signals) if e.signals else None,
+    }
+
+
+def _link_to_dict(link: FacilityEntityLink) -> dict:
+    return {
+        "id": link.id,
+        "facility_id": link.facility_id,
+        "entity_id": link.entity_id,
+        "link_type": link.link_type,
+        "strength": link.strength,
+        "evidence": json.loads(link.evidence) if link.evidence else None,
     }

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.sql import func
 
 from database import Base
@@ -39,3 +39,28 @@ class Facility(Base):
     # CRM pipeline
     deal_stage = Column(String, default="new", index=True)
     notes = Column(Text, nullable=True)
+
+
+class Entity(Base):
+    __tablename__ = "entities"
+
+    id = Column(String, primary_key=True)
+    entity_type = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    normalized_key = Column(String, nullable=False, unique=True, index=True)
+    confidence = Column(Float, nullable=False, default=0.0)
+    signals = Column(Text, nullable=True)  # JSON
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class FacilityEntityLink(Base):
+    __tablename__ = "facility_entity_links"
+
+    id = Column(String, primary_key=True)
+    facility_id = Column(String, ForeignKey("facilities.id"), nullable=False, index=True)
+    entity_id = Column(String, ForeignKey("entities.id"), nullable=False, index=True)
+    link_type = Column(String, nullable=False, index=True)
+    strength = Column(Float, nullable=False, default=0.0)
+    evidence = Column(Text, nullable=True)  # JSON
+    created_at = Column(DateTime, server_default=func.now())

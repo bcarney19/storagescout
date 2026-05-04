@@ -22,4 +22,10 @@ export const api = {
 
   updateFacility: (id, updates) =>
     http.patch(`/facilities/${id}`, updates).then((r) => r.data),
+
+  getFacilityEntities: (id) =>
+    http.get(`/facilities/${id}/entities`).then((r) => r.data),
+
+  rebuildEntities: () =>
+    http.post('/entities/rebuild', null, { headers: importHeaders() }).then((r) => r.data),
 }
