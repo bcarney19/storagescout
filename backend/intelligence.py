@@ -41,6 +41,34 @@ CHAIN_NAME_PATTERNS = (
     "devon self storage",
 )
 
+NON_TARGET_PATTERNS = (
+    "airbnb",
+    "bed and breakfast",
+    "cabin",
+    "campground",
+    "cottage",
+    "guest house",
+    "guesthouse",
+    "hotel",
+    "inn",
+    "lodge",
+    "motel",
+    "rv park",
+    "rv resort",
+    "short term rental",
+    "tiny home",
+    "trailer parking",
+    "vacation rental",
+)
+
+REAL_MHP_PATTERNS = (
+    "manufactured home",
+    "mobile home",
+    "mhp",
+    "trailer court",
+    "trailer park",
+)
+
 
 def domain(url: Optional[str]) -> Optional[str]:
     if not url:
@@ -62,12 +90,24 @@ def is_probably_independent(facility: Facility) -> bool:
     return not is_chain(facility)
 
 
+def is_non_target(facility: Facility) -> bool:
+    name = " ".join(
+        str(part or "").lower()
+        for part in (facility.name, facility.google_name, facility.address)
+    )
+    if any(pattern in name for pattern in REAL_MHP_PATTERNS):
+        return False
+    return any(pattern in name for pattern in NON_TARGET_PATTERNS)
+
+
 def target_score(facility: Facility, linked_count: int = 0) -> int:
     score = facility.opportunity_score or 0
     if facility.facility_type == "mobile_home_park":
         score += 8
     if is_chain(facility):
         score -= 35
+    if is_non_target(facility):
+        score -= 70
     if linked_count >= 2:
         score += min(12, linked_count * 3)
     if facility.google_review_count is not None and facility.google_review_count <= 3:
@@ -93,6 +133,8 @@ def weakness_flags(facility: Facility) -> list[str]:
         flags.append("few reviews")
     if is_chain(facility):
         flags.append("chain/operator")
+    if is_non_target(facility):
+        flags.append("likely non-target")
     return flags
 
 
@@ -117,6 +159,8 @@ def lead_thesis(facility: Facility, linked_count: int = 0) -> str:
         parts.append("self-storage target")
     if is_chain(facility):
         parts.append("likely institutional/chain")
+    elif is_non_target(facility):
+        parts.append("likely non-target")
     else:
         parts.append("independent-looking")
     if flags:

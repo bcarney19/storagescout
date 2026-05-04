@@ -15,6 +15,7 @@ from database import AsyncSessionLocal, get_db, init_db, settings
 from entity_linker import rebuild_entities
 from intelligence import (
     is_chain,
+    is_non_target,
     lead_thesis,
     lead_tier,
     target_score,
@@ -72,6 +73,7 @@ async def get_facilities(
     zero_reviews: bool = False,
     dead_website: bool = False,
     min_target_score: Optional[int] = None,
+    exclude_non_targets: bool = True,
     limit: int = 5000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -135,6 +137,8 @@ async def get_facilities(
             linked_count=linked_counts.get(facility.id, 0),
         )
         if independent_only and data["is_chain"]:
+            continue
+        if exclude_non_targets and data["is_non_target"]:
             continue
         if min_target_score is not None and data["target_score"] < min_target_score:
             continue
@@ -585,6 +589,7 @@ async def _to_dict_with_intelligence(
         "target_score": score,
         "lead_tier": lead_tier(score),
         "is_chain": is_chain(f),
+        "is_non_target": is_non_target(f),
         "weakness_flags": weakness_flags(f),
         "lead_thesis": lead_thesis(f, linked_count),
         "entity_link_count": linked_count,
