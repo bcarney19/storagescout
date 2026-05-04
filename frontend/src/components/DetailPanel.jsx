@@ -47,6 +47,17 @@ function ScoreRing({ score }) {
   )
 }
 
+function MiniScore({ label, score }) {
+  const display = score ?? '-'
+  const color = score == null ? 'text-gray-600' : scoreLabel(score).color
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-gray-600">{label}</span>
+      <span className={`font-bold tabular-nums ${color}`}>{display}</span>
+    </div>
+  )
+}
+
 function BreakdownBar({ label, points, max }) {
   const pct = max > 0 ? Math.round((points / max) * 100) : 0
   return (
@@ -68,7 +79,8 @@ export default function DetailPanel({ facility: f, onClose, onUpdate, onSelectFa
 
   const bd = f.score_breakdown || {}
   const mapsUrl = `https://www.google.com/maps?q=${f.lat},${f.lng}`
-  const label = f.opportunity_score != null ? scoreLabel(f.opportunity_score) : null
+  const displayScore = f.target_score ?? f.opportunity_score
+  const label = displayScore != null ? scoreLabel(displayScore) : null
 
   useEffect(() => {
     setNotes(f.notes || '')
@@ -115,12 +127,33 @@ export default function DetailPanel({ facility: f, onClose, onUpdate, onSelectFa
 
       {/* Score */}
       <div className="flex items-center gap-4 p-3 border-b border-surface-600">
-        <ScoreRing score={f.opportunity_score} />
+        <ScoreRing score={displayScore} />
         <div className="text-xs">
-          <div className="text-gray-500 mb-0.5">Opportunity Score</div>
-          {label && <div className={`font-bold ${label.color}`}>{label.text}</div>}
+          <div className="text-gray-500 mb-0.5">Target Score</div>
+          {label && <div className={`font-bold ${label.color}`}>{(f.lead_tier || label.text).toUpperCase()}</div>}
           {f.scan_status === 'pending' && <div className="text-gray-600">Not yet scored</div>}
+          <div className="grid grid-cols-2 gap-4 mt-2">
+            <MiniScore label="Web" score={f.opportunity_score} />
+            <MiniScore label="Links" score={f.entity_link_count || 0} />
+          </div>
         </div>
+      </div>
+
+      {/* Thesis */}
+      <div className="p-3 border-b border-surface-600">
+        <div className="text-xs text-gray-600 tracking-widest mb-2">DEAL THESIS</div>
+        <div className="text-xs text-gray-300 leading-relaxed">
+          {f.lead_thesis || 'No thesis generated yet.'}
+        </div>
+        {f.weakness_flags?.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {f.weakness_flags.map((flag) => (
+              <span key={flag} className="px-1.5 py-0.5 rounded bg-white/10 text-gray-300 text-xs">
+                {flag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Score breakdown */}

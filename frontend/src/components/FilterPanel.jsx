@@ -73,6 +73,37 @@ export default function FilterPanel({ filters, onChange }) {
         </div>
       </Section>
 
+      <Section label="TARGET SCORE">
+        <div className="flex flex-col gap-2">
+          <div className="flex justify-between text-xs text-gray-600">
+            <span>Min: {filters.min_target_score}</span>
+            <span>PE rank</span>
+          </div>
+          <input type="range" min={0} max={100} value={filters.min_target_score}
+            onChange={(e) => set('min_target_score', Number(e.target.value))} className="w-full" />
+          <ToggleBtn active={filters.independent_only} onClick={() => set('independent_only', !filters.independent_only)}>
+            Suppress Chains
+          </ToggleBtn>
+        </div>
+      </Section>
+
+      <Section label="SIGNALS">
+        <div className="flex flex-col gap-1">
+          <ToggleBtn active={filters.no_website} onClick={() => set('no_website', !filters.no_website)}>
+            No Website
+          </ToggleBtn>
+          <ToggleBtn active={filters.no_phone} onClick={() => set('no_phone', !filters.no_phone)}>
+            No Phone
+          </ToggleBtn>
+          <ToggleBtn active={filters.zero_reviews} onClick={() => set('zero_reviews', !filters.zero_reviews)}>
+            Zero Reviews
+          </ToggleBtn>
+          <ToggleBtn active={filters.dead_website} onClick={() => set('dead_website', !filters.dead_website)}>
+            Dead Website
+          </ToggleBtn>
+        </div>
+      </Section>
+
       <Section label="DEAL STAGE">
         <div className="flex flex-col gap-1">
           {DEAL_STAGES.map((opt) => (

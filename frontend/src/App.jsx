@@ -9,17 +9,56 @@ import FilterPanel from './components/FilterPanel'
 import ScanModal from './components/ScanModal'
 import StatsBar from './components/StatsBar'
 
+const SAVED_VIEWS = [
+  {
+    label: 'PE Targets',
+    filters: { min_target_score: 65, independent_only: true, min_score: 0, max_score: 100 },
+  },
+  {
+    label: 'Prime MHP',
+    filters: { facility_type: 'mobile_home_park', min_target_score: 65, independent_only: true, min_score: 0, max_score: 100 },
+  },
+  {
+    label: 'Prime Storage',
+    filters: { facility_type: 'self_storage', min_target_score: 65, independent_only: true, min_score: 0, max_score: 100 },
+  },
+  {
+    label: 'No Website',
+    filters: { no_website: true, independent_only: true, min_score: 0, max_score: 100 },
+  },
+  {
+    label: 'No Phone',
+    filters: { no_phone: true, independent_only: true, min_score: 0, max_score: 100 },
+  },
+  {
+    label: 'Zero Reviews',
+    filters: { zero_reviews: true, independent_only: true, min_score: 0, max_score: 100 },
+  },
+  {
+    label: 'Dead Sites',
+    filters: { dead_website: true, independent_only: true, min_score: 0, max_score: 100 },
+  },
+]
+
+const DEFAULT_FILTERS = {
+  state: '',
+  facility_type: '',
+  min_score: 0,
+  max_score: 100,
+  deal_stage: '',
+  search: '',
+  independent_only: true,
+  no_website: false,
+  no_phone: false,
+  zero_reviews: false,
+  dead_website: false,
+  min_target_score: 65,
+}
+
 export default function App() {
   const [facilities, setFacilities] = useState([])
   const [stats, setStats] = useState(null)
-  const [filters, setFilters] = useState({
-    state: '',
-    facility_type: '',
-    min_score: 0,
-    max_score: 100,
-    deal_stage: '',
-    search: '',
-  })
+  const [filters, setFilters] = useState(DEFAULT_FILTERS)
   const [selected, setSelected] = useState(null)
   const [view, setView] = useState('map')
   const [showScanModal, setShowScanModal] = useState(false)
@@ -35,6 +74,12 @@ export default function App() {
       if (filters.max_score < 100) params.max_score = filters.max_score
       if (filters.deal_stage) params.deal_stage = filters.deal_stage
       if (filters.search) params.search = filters.search
+      if (filters.independent_only) params.independent_only = true
+      if (filters.no_website) params.no_website = true
+      if (filters.no_phone) params.no_phone = true
+      if (filters.zero_reviews) params.zero_reviews = true
+      if (filters.dead_website) params.dead_website = true
+      if (filters.min_target_score > 0) params.min_target_score = filters.min_target_score
       params.limit = 5000
 
       const [facs, statsData] = await Promise.all([
@@ -74,6 +119,7 @@ export default function App() {
   const exportCsv = () => {
     const headers = [
       'score', 'name', 'type', 'address', 'city', 'state', 'zip',
+      'target_score', 'tier', 'is_chain', 'weaknesses', 'thesis',
       'reviews', 'rating', 'website', 'phone', 'stage', 'notes',
     ]
     const rows = facilities.map((f) => [
@@ -84,6 +130,11 @@ export default function App() {
       f.city ?? '',
       f.state ?? '',
       f.zip_code ?? '',
+      f.target_score ?? '',
+      f.lead_tier ?? '',
+      f.is_chain ? 'yes' : 'no',
+      (f.weakness_flags || []).join('; '),
+      f.lead_thesis ?? '',
       f.google_review_count ?? '',
       f.google_rating ?? '',
       f.google_website ?? '',
@@ -101,6 +152,12 @@ export default function App() {
     a.download = `storage-scout-${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const applySavedView = (viewFilters) => {
+    setFilters({ ...DEFAULT_FILTERS, ...viewFilters, search: filters.search })
+    setView('map')
+    setSelected(null)
   }
 
   return (
@@ -131,6 +188,24 @@ export default function App() {
 
       <StatsBar stats={stats} />
 
+      <div className="flex items-center gap-1 px-3 py-2 border-b border-surface-600 bg-black shrink-0 overflow-x-auto">
+        {SAVED_VIEWS.map((saved) => (
+          <button
+            key={saved.label}
+            onClick={() => applySavedView(saved.filters)}
+            className="px-2.5 py-1 text-xs rounded bg-surface-800 border border-surface-600 text-gray-300 hover:text-white hover:border-gray-500 whitespace-nowrap"
+          >
+            {saved.label}
+          </button>
+        ))}
+        <button
+          onClick={() => setFilters(DEFAULT_FILTERS)}
+          className="px-2.5 py-1 text-xs rounded text-gray-600 hover:text-white whitespace-nowrap"
+        >
+          Reset Targets
+        </button>
+      </div>
+
       <div className="flex flex-1 min-h-0">
         <FilterPanel filters={filters} onChange={setFilters} />
 
@@ -142,6 +217,14 @@ export default function App() {
             <ViewBtn active={view === 'entities'} onClick={() => setView('entities')} icon={<GitBranch size={11} />}>ENTITIES</ViewBtn>
             {view !== 'entities' && (
               <>
+                <button
+                  onClick={() => setFilters((p) => ({ ...p, independent_only: !p.independent_only }))}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    filters.independent_only ? 'bg-white text-black font-bold' : 'text-gray-500 hover:text-white'
+                  }`}
+                >
+                  INDEPENDENT
+                </button>
                 <div className="flex items-center gap-2 bg-surface-800 border border-surface-600 rounded px-2 py-1 ml-2 w-72">
                   <Search size={11} className="text-gray-600 shrink-0" />
                   <input
@@ -165,7 +248,7 @@ export default function App() {
             </span>
             {view !== 'entities' && (
               <span className="text-xs text-gray-600 tabular-nums">
-                MHP {typeCounts.mobile.toLocaleString()} / SS {typeCounts.storage.toLocaleString()}
+                MHP {typeCounts.mobile.toLocaleString()} / SS {typeCounts.storage.toLocaleString()} / target {filters.min_target_score}+
               </span>
             )}
           </div>

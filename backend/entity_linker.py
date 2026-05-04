@@ -35,6 +35,19 @@ GENERIC_NAME_TOKENS = {
     "village",
 }
 
+IGNORED_DOMAINS = {
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
+    "maps.google.com",
+    "goo.gl",
+    "sites.google.com",
+    "business.site",
+    "storageunitsoftware.com",
+    "sitelinkstore.com",
+    "mhvillage.com",
+}
+
 
 async def rebuild_entities(db: AsyncSession) -> dict:
     facilities = (await db.execute(select(Facility))).scalars().all()
@@ -101,7 +114,7 @@ def _build_groups(facilities: Iterable[Facility]) -> dict[str, dict]:
 
 def _facility_keys(facility: Facility):
     domain = _domain(facility.google_website)
-    if domain:
+    if domain and not _ignored_domain(domain):
         yield f"domain:{domain}", "shared_domain", 0.9, domain
 
     phone = _phone(facility.google_phone)
@@ -121,6 +134,10 @@ def _domain(url: Optional[str]) -> Optional[str]:
     if host.startswith("www."):
         host = host[4:]
     return host or None
+
+
+def _ignored_domain(host: str) -> bool:
+    return any(host == d or host.endswith(f".{d}") for d in IGNORED_DOMAINS)
 
 
 def _phone(phone: Optional[str]) -> Optional[str]:

@@ -56,7 +56,7 @@ export default function FacilityMap({ facilities, selected, onSelect }) {
       {selected && <FlyTo facility={selected} />}
       {facilities.map((f) => {
         const isSelected = selected?.id === f.id
-        const color = scoreColor(f.opportunity_score)
+        const color = scoreColor(f.target_score ?? f.opportunity_score)
         return (
           <CircleMarker
             key={f.id}
@@ -75,9 +75,10 @@ export default function FacilityMap({ facilities, selected, onSelect }) {
                 <div style={{ fontWeight: 'bold' }}>{f.name || '(unnamed)'}</div>
                 <div>{[f.city, f.state].filter(Boolean).join(', ')}</div>
                 <div>{f.facility_type === 'self_storage' ? 'Self Storage' : 'Mobile Home Park'}</div>
-                {f.opportunity_score != null && (
-                  <div>Score: {f.opportunity_score}/100</div>
+                {(f.target_score ?? f.opportunity_score) != null && (
+                  <div>Target: {f.target_score ?? f.opportunity_score}/100</div>
                 )}
+                {f.lead_thesis && <div>{f.lead_thesis}</div>}
               </div>
             </Tooltip>
           </CircleMarker>

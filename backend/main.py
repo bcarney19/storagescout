@@ -13,6 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import AsyncSessionLocal, get_db, init_db, settings
 from entity_linker import rebuild_entities
+from intelligence import (
+    is_chain,
+    lead_thesis,
+    lead_tier,
+    target_score,
+    weakness_flags,
+)
 from models import Entity, Facility, FacilityEntityLink
 from places_fetcher import (
     US_STATES,
@@ -59,6 +66,12 @@ async def get_facilities(
     scan_status: Optional[str] = None,
     deal_stage: Optional[str] = None,
     search: Optional[str] = None,
+    independent_only: bool = False,
+    no_website: bool = False,
+    no_phone: bool = False,
+    zero_reviews: bool = False,
+    dead_website: bool = False,
+    min_target_score: Optional[int] = None,
     limit: int = 5000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -85,13 +98,48 @@ async def get_facilities(
             Facility.google_website.ilike(term),
             Facility.google_phone.ilike(term),
         ))
+    if no_website:
+        q = q.where(Facility.google_website.is_(None))
+    if no_phone:
+        q = q.where(Facility.google_phone.is_(None))
+    if zero_reviews:
+        q = q.where(Facility.google_review_count == 0)
+    if dead_website:
+        q = q.where(Facility.website_alive.is_(False))
     q = (
         q.order_by(Facility.opportunity_score.desc().nullslast())
         .limit(limit)
         .offset(offset)
     )
     rows = (await db.execute(q)).scalars().all()
-    return [_to_dict(f) for f in rows]
+    ids = [facility.id for facility in rows]
+    linked_counts = {}
+    if ids:
+        linked_counts = dict(
+            (
+                await db.execute(
+                    select(
+                        FacilityEntityLink.facility_id,
+                        func.count(FacilityEntityLink.id),
+                    )
+                    .where(FacilityEntityLink.facility_id.in_(ids))
+                    .group_by(FacilityEntityLink.facility_id)
+                )
+            ).all()
+        )
+    result = []
+    for facility in rows:
+        data = await _to_dict_with_intelligence(
+            db,
+            facility,
+            linked_count=linked_counts.get(facility.id, 0),
+        )
+        if independent_only and data["is_chain"]:
+            continue
+        if min_target_score is not None and data["target_score"] < min_target_score:
+            continue
+        result.append(data)
+    return result[:limit]
 
 
 @app.get("/api/stats")
@@ -110,6 +158,14 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         "pending": (total or 0) - (scanned or 0),
         "has_api_key": bool(settings.google_places_api_key),
         "active_scans": list(active_scans.values()),
+        "chains": await db.scalar(select(func.count(Facility.id)).where(
+            or_(
+                Facility.name.ilike("%u-haul%"),
+                Facility.name.ilike("%public storage%"),
+                Facility.name.ilike("%extra space%"),
+                Facility.name.ilike("%cubesmart%"),
+            )
+        )) or 0,
     }
 
 
@@ -181,7 +237,7 @@ async def get_facility_entities(
         result.append({
             **_entity_to_dict(entity),
             "link": _link_to_dict(link),
-            "linked_facilities": [_to_dict(f) for f in linked_facilities],
+                "linked_facilities": [await _to_dict_with_intelligence(db, f) for f in linked_facilities],
         })
     return result
 
@@ -505,7 +561,33 @@ async def _entity_to_dict_with_rollup(
         "max_score": metrics[1],
         "avg_score": round(metrics[2], 1) if metrics[2] is not None else None,
         "high_opportunity_count": metrics[3] or 0,
-        "linked_facilities": [_to_dict(f) for f in facilities],
+        "linked_facilities": [await _to_dict_with_intelligence(db, f) for f in facilities],
+    }
+
+
+async def _linked_count(db: AsyncSession, facility_id: str) -> int:
+    return await db.scalar(
+        select(func.count(FacilityEntityLink.id))
+        .where(FacilityEntityLink.facility_id == facility_id)
+    ) or 0
+
+
+async def _to_dict_with_intelligence(
+    db: AsyncSession,
+    f: Facility,
+    linked_count: Optional[int] = None,
+) -> dict:
+    if linked_count is None:
+        linked_count = await _linked_count(db, f.id)
+    score = target_score(f, linked_count)
+    return {
+        **_to_dict(f),
+        "target_score": score,
+        "lead_tier": lead_tier(score),
+        "is_chain": is_chain(f),
+        "weakness_flags": weakness_flags(f),
+        "lead_thesis": lead_thesis(f, linked_count),
+        "entity_link_count": linked_count,
     }
 
 

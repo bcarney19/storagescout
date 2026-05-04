@@ -28,8 +28,13 @@ const STAGE_PILL = {
 }
 
 const columns = [
+  col.accessor('target_score', {
+    header: 'TARGET',
+    cell: (i) => <ScoreBadge score={i.getValue()} />,
+    size: 70,
+  }),
   col.accessor('opportunity_score', {
-    header: 'SCORE',
+    header: 'WEB',
     cell: (i) => <ScoreBadge score={i.getValue()} />,
     size: 65,
   }),
@@ -73,6 +78,10 @@ const columns = [
       </span>
     ),
     size: 90,
+  }),
+  col.accessor('lead_thesis', {
+    header: 'THESIS',
+    cell: (i) => <span className="text-gray-500 truncate block max-w-96">{i.getValue()}</span>,
   }),
 ]
 
