@@ -26,6 +26,9 @@ export const api = {
   getFacilityEntities: (id) =>
     http.get(`/facilities/${id}/entities`).then((r) => r.data),
 
+  getEntities: (params) =>
+    http.get('/entities', { params }).then((r) => r.data),
+
   rebuildEntities: () =>
     http.post('/entities/rebuild', null, { headers: importHeaders() }).then((r) => r.data),
 }

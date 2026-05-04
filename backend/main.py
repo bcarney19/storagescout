@@ -8,7 +8,7 @@ from typing import Any, Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import func, select, update
+from sqlalchemy import Integer, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import AsyncSessionLocal, get_db, init_db, settings
@@ -58,6 +58,7 @@ async def get_facilities(
     max_score: Optional[int] = None,
     scan_status: Optional[str] = None,
     deal_stage: Optional[str] = None,
+    search: Optional[str] = None,
     limit: int = 1000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -75,6 +76,15 @@ async def get_facilities(
         q = q.where(Facility.scan_status == scan_status)
     if deal_stage:
         q = q.where(Facility.deal_stage == deal_stage)
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.where(or_(
+            Facility.name.ilike(term),
+            Facility.city.ilike(term),
+            Facility.address.ilike(term),
+            Facility.google_website.ilike(term),
+            Facility.google_phone.ilike(term),
+        ))
     q = (
         q.order_by(Facility.opportunity_score.desc().nullslast())
         .limit(limit)
@@ -178,19 +188,38 @@ async def get_facility_entities(
 
 @app.get("/api/entities")
 async def get_entities(
+    search: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
+    q = select(Entity)
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.where(or_(
+            Entity.name.ilike(term),
+            Entity.normalized_key.ilike(term),
+        ))
     rows = (
         await db.execute(
-            select(Entity)
+            q
             .order_by(Entity.confidence.desc(), Entity.name.asc())
             .limit(limit)
             .offset(offset)
         )
     ).scalars().all()
-    return [_entity_to_dict(e) for e in rows]
+    return [await _entity_to_dict_with_rollup(db, e) for e in rows]
+
+
+@app.get("/api/entities/{entity_id}")
+async def get_entity(
+    entity_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    entity = await db.get(Entity, entity_id)
+    if not entity:
+        raise HTTPException(404, "Entity not found")
+    return await _entity_to_dict_with_rollup(db, entity, facility_limit=50)
 
 
 @app.post("/api/entities/rebuild")
@@ -439,6 +468,44 @@ def _entity_to_dict(e: Entity) -> dict:
         "normalized_key": e.normalized_key,
         "confidence": e.confidence,
         "signals": json.loads(e.signals) if e.signals else None,
+    }
+
+
+async def _entity_to_dict_with_rollup(
+    db: AsyncSession,
+    entity: Entity,
+    facility_limit: int = 8,
+) -> dict:
+    facilities = (
+        await db.execute(
+            select(Facility)
+            .join(FacilityEntityLink, FacilityEntityLink.facility_id == Facility.id)
+            .where(FacilityEntityLink.entity_id == entity.id)
+            .order_by(Facility.opportunity_score.desc().nullslast())
+            .limit(facility_limit)
+        )
+    ).scalars().all()
+    metrics = (
+        await db.execute(
+            select(
+                func.count(Facility.id),
+                func.max(Facility.opportunity_score),
+                func.avg(Facility.opportunity_score),
+                func.sum(
+                    (Facility.opportunity_score >= 70).cast(Integer)
+                ),
+            )
+            .join(FacilityEntityLink, FacilityEntityLink.facility_id == Facility.id)
+            .where(FacilityEntityLink.entity_id == entity.id)
+        )
+    ).one()
+    return {
+        **_entity_to_dict(entity),
+        "facility_count": metrics[0] or 0,
+        "max_score": metrics[1],
+        "avg_score": round(metrics[2], 1) if metrics[2] is not None else None,
+        "high_opportunity_count": metrics[3] or 0,
+        "linked_facilities": [_to_dict(f) for f in facilities],
     }
 
 
