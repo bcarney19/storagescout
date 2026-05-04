@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap } from 'react-leaflet'
 
 // HIGH score = red (prime lead), LOW score = green (well-run, skip)
@@ -19,6 +19,31 @@ function FlyTo({ facility }) {
   return null
 }
 
+function FitToFacilities({ facilities, selected }) {
+  const map = useMap()
+  const lastSignature = useRef('')
+
+  useEffect(() => {
+    if (selected || facilities.length === 0) return
+    const first = facilities[0]?.id || ''
+    const last = facilities[facilities.length - 1]?.id || ''
+    const signature = `${facilities.length}:${first}:${last}`
+    if (signature === lastSignature.current) return
+    lastSignature.current = signature
+
+    const points = facilities
+      .filter((f) => Number.isFinite(f.lat) && Number.isFinite(f.lng))
+      .map((f) => [f.lat, f.lng])
+    if (points.length === 1) {
+      map.setView(points[0], 9)
+    } else if (points.length > 1) {
+      map.fitBounds(points, { padding: [40, 40], maxZoom: 8 })
+    }
+  }, [facilities, map, selected])
+
+  return null
+}
+
 export default function FacilityMap({ facilities, selected, onSelect }) {
   return (
     <MapContainer center={[39.5, -98.35]} zoom={4} style={{ height: '100%', width: '100%' }}>
@@ -27,6 +52,7 @@ export default function FacilityMap({ facilities, selected, onSelect }) {
         attribution='&copy; OpenStreetMap &copy; CARTO'
         maxZoom={20}
       />
+      <FitToFacilities facilities={facilities} selected={selected} />
       {selected && <FlyTo facility={selected} />}
       {facilities.map((f) => {
         const isSelected = selected?.id === f.id

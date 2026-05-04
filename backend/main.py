@@ -59,7 +59,7 @@ async def get_facilities(
     scan_status: Optional[str] = None,
     deal_stage: Optional[str] = None,
     search: Optional[str] = None,
-    limit: int = 1000,
+    limit: int = 5000,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):

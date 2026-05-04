@@ -35,6 +35,7 @@ export default function App() {
       if (filters.max_score < 100) params.max_score = filters.max_score
       if (filters.deal_stage) params.deal_stage = filters.deal_stage
       if (filters.search) params.search = filters.search
+      params.limit = 5000
 
       const [facs, statsData] = await Promise.all([
         api.getFacilities(params),
@@ -60,6 +61,15 @@ export default function App() {
     setFacilities((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)))
     setSelected((prev) => (prev?.id === id ? { ...prev, ...updates } : prev))
   }
+
+  const typeCounts = facilities.reduce(
+    (acc, facility) => {
+      if (facility.facility_type === 'mobile_home_park') acc.mobile += 1
+      if (facility.facility_type === 'self_storage') acc.storage += 1
+      return acc
+    },
+    { mobile: 0, storage: 0 }
+  )
 
   const exportCsv = () => {
     const headers = [
@@ -153,6 +163,11 @@ export default function App() {
             <span className="ml-auto text-xs text-gray-600 tabular-nums">
               {view === 'entities' ? 'operator candidates' : `${facilities.length.toLocaleString()} facilities`}
             </span>
+            {view !== 'entities' && (
+              <span className="text-xs text-gray-600 tabular-nums">
+                MHP {typeCounts.mobile.toLocaleString()} / SS {typeCounts.storage.toLocaleString()}
+              </span>
+            )}
           </div>
 
           <div className="flex-1 min-h-0 relative">
