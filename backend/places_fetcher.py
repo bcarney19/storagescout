@@ -2,6 +2,9 @@
 Discovers self-storage and mobile home parks using the Google Places Nearby Search API.
 Covers a state by laying a lat/lon grid and searching within a radius at each point.
 Deduplicates by place_id so overlapping grid cells don't produce duplicate records.
+
+Nearby Search can return businesses just across a state border. Before saving, each
+candidate is validated using structured address components from Place Details.
 """
 import asyncio
 import logging
@@ -104,11 +107,28 @@ async def fetch_facilities_for_state(state_code: str, facility_types: list[str])
         async with sem:
             places = await _nearby_search(lat, lon, keyword)
             async with lock:
-                for p in places:
-                    pid = p.get("place_id")
-                    if pid and pid not in seen_ids:
-                        seen_ids.add(pid)
-                        results.append(_map_place(p, ftype, state_code))
+                new_places = [
+                    p for p in places
+                    if p.get("place_id") and p["place_id"] not in seen_ids
+                ]
+                for p in new_places:
+                    seen_ids.add(p["place_id"])
+
+            for p in new_places:
+                details = await _get_import_details(p["place_id"])
+                if not details:
+                    logger.warning("Skipping %s: no place details", p.get("place_id"))
+                    continue
+                if not _is_in_state(details, state_code):
+                    logger.debug(
+                        "Skipping %s: outside %s (%s)",
+                        details.get("name") or p.get("name"),
+                        state_code,
+                        _state_from_components(details.get("address_components", [])),
+                    )
+                    continue
+                async with lock:
+                    results.append(_map_place(details, ftype, state_code))
 
     tasks = []
     for ftype in facility_types:
@@ -155,13 +175,45 @@ async def _nearby_search(lat: float, lon: float, keyword: str) -> list[dict]:
         return data.get("results", [])
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8))
+async def _get_import_details(place_id: str) -> Optional[dict]:
+    async with httpx.AsyncClient(timeout=12) as client:
+        r = await client.get(
+            f"{PLACES_BASE}/details/json",
+            params={
+                "place_id": place_id,
+                "fields": (
+                    "place_id,name,formatted_address,address_component,geometry,"
+                    "rating,user_ratings_total,business_status"
+                ),
+                "key": settings.google_places_api_key,
+            },
+        )
+        result = r.json().get("result", {})
+        return result or None
+
+
+def _is_in_state(place: dict, state_code: str) -> bool:
+    return _state_from_components(place.get("address_components", [])) == state_code
+
+
+def _state_from_components(components: list[dict]) -> Optional[str]:
+    for component in components:
+        if "administrative_area_level_1" in component.get("types", []):
+            return component.get("short_name")
+    return None
+
+
+def _component(components: list[dict], type_name: str, key: str = "long_name") -> Optional[str]:
+    for component in components:
+        if type_name in component.get("types", []):
+            return component.get(key)
+    return None
+
+
 def _map_place(p: dict, ftype: str, state_code: str) -> dict:
     loc = p.get("geometry", {}).get("location", {})
-    vicinity = p.get("vicinity", "")
-    # vicinity is usually "Street Address, City"
-    parts = [x.strip() for x in vicinity.split(",")]
-    city = parts[-1] if len(parts) > 1 else None
-    address = parts[0] if parts else None
+    components = p.get("address_components", [])
 
     return {
         "osm_id": None,
@@ -170,13 +222,25 @@ def _map_place(p: dict, ftype: str, state_code: str) -> dict:
         "facility_type": ftype,
         "lat": loc.get("lat"),
         "lng": loc.get("lng"),
-        "address": address,
-        "city": city,
+        "address": _street_address(components) or p.get("formatted_address"),
+        "city": (
+            _component(components, "locality")
+            or _component(components, "postal_town")
+            or _component(components, "administrative_area_level_2")
+        ),
         "state": state_code,
-        "zip_code": None,
+        "zip_code": _component(components, "postal_code"),
         # Prefill partial Google data from the Nearby Search response
         "google_name": p.get("name"),
         "google_rating": p.get("rating"),
         "google_review_count": p.get("user_ratings_total"),
         "google_business_status": p.get("business_status", "OPERATIONAL"),
     }
+
+
+def _street_address(components: list[dict]) -> Optional[str]:
+    street_number = _component(components, "street_number")
+    route = _component(components, "route")
+    if street_number and route:
+        return f"{street_number} {route}"
+    return route or street_number

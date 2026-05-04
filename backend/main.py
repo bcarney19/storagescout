@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
@@ -125,11 +125,25 @@ class ImportRequest(BaseModel):
     facility_types: list[str] = ["self_storage", "mobile_home_park"]
 
 
+async def require_import_token(
+    authorization: Optional[str] = Header(default=None),
+    x_import_token: Optional[str] = Header(default=None),
+):
+    if not settings.import_api_token:
+        return
+    bearer = None
+    if authorization and authorization.lower().startswith("bearer "):
+        bearer = authorization[7:].strip()
+    if x_import_token != settings.import_api_token and bearer != settings.import_api_token:
+        raise HTTPException(401, "Import token required")
+
+
 @app.post("/api/import/{state_code}")
 async def import_state(
     state_code: str,
     body: ImportRequest,
     background_tasks: BackgroundTasks,
+    _: None = Depends(require_import_token),
 ):
     state_code = state_code.upper()
     if state_code not in US_STATES:

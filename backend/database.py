@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     google_places_api_key: str = ""
     database_url: str = "sqlite+aiosqlite:///./storage_leads.db"
+    import_api_token: str = ""
 
     class Config:
         env_file = ".env"

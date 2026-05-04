@@ -17,6 +17,8 @@ export default function ScanModal({ onClose, hasApiKey }) {
   const [types, setTypes] = useState({ self_storage: true, mobile_home_park: true })
   const [scanId, setScanId] = useState(null)
   const [scanData, setScanData] = useState(null)
+  const [importToken, setImportToken] = useState(() => localStorage.getItem('storageScoutImportToken') || '')
+  const [error, setError] = useState('')
   const pollRef = useRef(null)
 
   const toggleType = (key) => setTypes((p) => ({ ...p, [key]: !p[key] }))
@@ -24,8 +26,18 @@ export default function ScanModal({ onClose, hasApiKey }) {
   const start = async () => {
     const facility_types = Object.entries(types).filter(([, v]) => v).map(([k]) => k)
     if (!facility_types.length) return
-    const res = await api.importState(state, { facility_types })
-    setScanId(res.scan_id)
+    localStorage.setItem('storageScoutImportToken', importToken)
+    setError('')
+    try {
+      const res = await api.importState(state, { facility_types })
+      setScanId(res.scan_id)
+    } catch (e) {
+      if (e.response?.status === 401) {
+        setError('Import token required or incorrect.')
+      } else {
+        setError(e.response?.data?.detail || 'Import failed.')
+      }
+    }
   }
 
   useEffect(() => {
@@ -101,6 +113,23 @@ export default function ScanModal({ onClose, hasApiKey }) {
                 ))}
               </div>
             </div>
+
+            <div className="mb-5">
+              <label className="text-xs text-gray-600 tracking-widest block mb-1.5">IMPORT TOKEN</label>
+              <input
+                type="password"
+                value={importToken}
+                onChange={(e) => setImportToken(e.target.value)}
+                placeholder="Optional unless configured"
+                className="w-full bg-surface-800 border border-surface-600 text-white text-sm px-3 py-2 rounded focus:outline-none focus:border-white placeholder-gray-700"
+              />
+            </div>
+
+            {error && (
+              <div className="mb-4 text-xs text-red-400 bg-surface-800 border border-surface-600 rounded p-2">
+                {error}
+              </div>
+            )}
 
             <button
               onClick={start}
